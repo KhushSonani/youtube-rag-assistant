@@ -4,3 +4,4 @@ __pycache__/
 .env
 vector_db/
 cache/
+temp.py
