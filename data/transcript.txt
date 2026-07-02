@@ -1,0 +1,1 @@
+[[0.00]]Hello and welcome to the video. [[10.00]]Today we will discuss LangChain. [[20.00]]LangChain provides many chains. [[30.00]]MultiQueryRetriever is useful for vector search. [[40.00]]It generates multiple queries. [[50.00]]Thanks for watching.

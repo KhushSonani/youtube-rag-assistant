@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube RAG Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & tokens ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d0d14;
+      --surface:     #14141f;
+      --surface2:    #1c1c2e;
+      --border:      rgba(255,255,255,0.07);
+      --accent:      #6C63FF;
+      --accent-soft: rgba(108,99,255,0.15);
+      --accent-glow: rgba(108,99,255,0.4);
+      --red:         #ff4545;
+      --green:       #22c55e;
+      --text:        #e8e8f0;
+      --muted:       #6b6b8a;
+      --radius:      12px;
+      --radius-sm:   8px;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      width: 420px;
+      min-height: 560px;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, #14141f 0%, #1a1a2e 100%);
+    }
+    .header-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, #ff4545, #ff6b35);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      box-shadow: 0 0 16px rgba(255,69,69,0.35);
+      flex-shrink: 0;
+    }
+    .header-title { font-size: 14px; font-weight: 600; letter-spacing: 0.3px; }
+    .header-sub   { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .server-status {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 500;
+      color: var(--muted);
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+    .dot.connected   { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.6); }
+    .dot.error       { background: var(--red);   box-shadow: 0 0 6px rgba(255,69,69,0.6); }
+
+    /* ── Video status banner ─────────────────────────────────────────── */
+    #video-banner {
+      margin: 12px 12px 0;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12px; font-weight: 500;
+      transition: all 0.3s ease;
+    }
+    #video-banner .banner-icon { font-size: 18px; flex-shrink: 0; }
+    #banner-text { color: var(--muted); flex: 1; }
+    #banner-text strong { color: var(--text); display: block; font-size: 11px; }
+    .badge {
+      font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+      padding: 2px 7px; border-radius: 20px;
+      background: var(--accent-soft); color: var(--accent);
+      text-transform: uppercase;
+    }
+    .badge.loading { background: rgba(234,179,8,0.15); color: #eab308; }
+    .badge.error   { background: rgba(255,69,69,0.15);  color: var(--red); }
+    .badge.ready   { background: rgba(34,197,94,0.15);  color: var(--green); }
+
+    /* ── Chat / Answer area ──────────────────────────────────────────── */
+    .chat-area {
+      flex: 1;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 200px;
+      max-height: 300px;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    .chat-area::-webkit-scrollbar { width: 4px; }
+    .chat-area::-webkit-scrollbar-track { background: transparent; }
+    .chat-area::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 4px; }
+
+    .empty-state {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 8px; flex: 1;
+      color: var(--muted); text-align: center; padding: 24px;
+    }
+    .empty-state .es-icon { font-size: 36px; opacity: 0.5; }
+    .empty-state p { font-size: 12px; line-height: 1.5; }
+
+    /* Message bubbles */
+    .message {
+      display: flex; flex-direction: column; gap: 4px;
+      animation: slideUp 0.2s ease;
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .msg-label { font-size: 10px; font-weight: 600; text-transform: uppercase;
+                 letter-spacing: 0.6px; color: var(--muted); padding-left: 2px; }
+    .msg-label.user { color: var(--accent); }
+
+    .bubble {
+      padding: 10px 13px;
+      border-radius: var(--radius-sm);
+      font-size: 13px; line-height: 1.6;
+      border: 1px solid var(--border);
+    }
+    .bubble.user {
+      background: var(--accent-soft);
+      border-color: rgba(108,99,255,0.2);
+      color: #d4d0ff;
+      align-self: flex-end;
+      max-width: 90%;
+    }
+    .bubble.ai {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    /* Typing cursor */
+    .cursor {
+      display: inline-block; width: 2px; height: 14px;
+      background: var(--accent);
+      margin-left: 2px; vertical-align: text-bottom;
+      animation: blink 0.7s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── Sources section ─────────────────────────────────────────────── */
+    #sources-section {
+      margin: 0 12px;
+      display: none;
+      animation: slideUp 0.25s ease;
+    }
+    .sources-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--muted);
+      margin-bottom: 6px; padding-left: 2px;
+    }
+    .sources-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 20px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(108,99,255,0.25);
+      color: var(--accent); font-size: 11px; font-weight: 500;
+      text-decoration: none; cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .source-chip:hover {
+      background: rgba(108,99,255,0.25);
+      box-shadow: 0 0 10px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+    .source-chip .chip-icon { font-size: 10px; }
+
+    /* ── Input area ──────────────────────────────────────────────────── */
+    .input-area {
+      padding: 10px 12px 14px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .input-row {
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    #question-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      padding: 9px 12px;
+      resize: none;
+      outline: none;
+      min-height: 40px; max-height: 100px;
+      transition: border-color 0.2s;
+      line-height: 1.4;
+    }
+    #question-input::placeholder { color: var(--muted); }
+    #question-input:focus { border-color: var(--accent); }
+
+    #send-btn {
+      width: 40px; height: 40px; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--accent), #9b5cf6);
+      border: none; border-radius: var(--radius-sm);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 12px var(--accent-glow);
+    }
+    #send-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 18px var(--accent-glow);
+    }
+    #send-btn:disabled {
+      opacity: 0.4; cursor: not-allowed;
+      box-shadow: none; transform: none;
+    }
+
+    /* ── Spinner ─────────────────────────────────────────────────────── */
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Divider ─────────────────────────────────────────────────────── */
+    .divider { height: 1px; background: var(--border); margin: 8px 12px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-icon">▶</div>
+    <div>
+      <div class="header-title">RAG Assistant</div>
+      <div class="header-sub">YouTube × AI</div>
+    </div>
+    <div class="server-status">
+      <div class="dot" id="server-dot"></div>
+      <span id="server-text">Connecting…</span>
+    </div>
+  </header>
+
+  <!-- Video banner -->
+  <div id="video-banner">
+    <span class="banner-icon">🎬</span>
+    <div id="banner-text">
+      <span id="banner-msg">Detecting video…</span>
+      <strong id="banner-vid"></strong>
+    </div>
+    <span class="badge loading" id="video-badge">Loading</span>
+  </div>
+
+  <!-- Chat area -->
+  <div class="chat-area" id="chat-area">
+    <div class="empty-state" id="empty-state">
+      <div class="es-icon">🤖</div>
+      <p>Ask anything about the<br/>current YouTube video.</p>
+    </div>
+  </div>
+
+  <!-- Sources -->
+  <div id="sources-section">
+    <div class="divider"></div>
+    <div style="padding: 0 2px 8px;">
+      <div class="sources-label">Sources</div>
+      <div class="sources-list" id="sources-list"></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Input area -->
+  <div class="input-area">
+    <div class="input-row">
+      <textarea
+        id="question-input"
+        placeholder="Ask about this video…"
+        rows="1"
+        disabled
+      ></textarea>
+      <button id="send-btn" disabled title="Send">
+        <span id="send-icon">➤</span>
+      </button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
