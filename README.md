@@ -23,6 +23,7 @@ A standard chatbot (like ChatGPT) relies purely on its pre-trained data and has 
 - **Local Transcript Caching:** Saves fetched transcripts to the local disk to avoid repetitive API requests and prevent rate-limiting/IP-blocking.
 - **FAISS Vector Database:** Stores embedded chunks in a persistent, locally saved vector database, grouped per video ID.
 - **Semantic Search:** Uses HuggingFace embeddings to understand the true meaning of the user's question, rather than just exact keyword matching.
+- **MMR-based diverse retrieval for improved context selection**
 - **MultiQueryRetriever:** Generates multiple variations of a user's question to maximize the chances of retrieving the correct context.
 - **LLM-Powered Answers:** Utilizes Groq's blazing-fast Llama-3.3-70b-versatile model to synthesize natural, accurate answers.
 - **Streaming Responses (SSE):** Answers stream token-by-token back to the user instantly (Server-Sent Events), eliminating long loading screens.
@@ -42,6 +43,7 @@ A standard chatbot (like ChatGPT) relies purely on its pre-trained data and has 
 | **FastAPI** | High-performance async web framework. | `app.py` |
 | **LangChain** | Orchestrates the RAG pipeline (splitters, retrievers, LCEL). | `src/splitter.py`, `src/rag.py`, `src/session.py` |
 | **FAISS** | Facebook AI Similarity Search vector database. | `src/vectorstore.py` |
+| **MMR (Maximal Marginal Relevance)** | Balances relevance and diversity during vector retrieval. | `src/retriever.py` |
 | **Groq (ChatGroq)** | Lightning-fast inference provider for LLMs. | `src/llm.py` |
 | **Llama-3.3-70B** | The Large Language Model generating the final answers. | `src/llm.py` |
 | **HuggingFace** | Provides the `all-MiniLM-L6-v2` embedding model. | `src/embeddings.py` |
@@ -79,7 +81,7 @@ The architecture represents a complete end-to-end RAG system.
                 = (User asks a question via POST /ask)
                 |
                 v
-       [ Retriever ] -> MultiQueryRetriever queries FAISS for semantic matches.
+       [ Retriever ] -> MultiQueryRetriever queries FAISS using MMR (Maximal Marginal Relevance).
                 |
                 v
      [ Prompt Construction ] -> Merges context chunks with the user query.
@@ -95,7 +97,7 @@ The architecture represents a complete end-to-end RAG system.
 ```
 
 1. **Initialization:** The user loads a video. The backend checks for an existing FAISS index. If missing, it ingests the transcript, splits it, embeds it, and saves it to FAISS.
-2. **Querying:** The user submits a question. The query is embedded, and FAISS returns the top nearest chunks.
+2. **Querying:** The user submits a question. The query is embedded, and FAISS returns the top nearest chunks using an MMR-based search strategy to ensure diversity.
 3. **Generation:** LangChain bundles the chunks into a prompt. Groq streams the answer back to the extension alongside exact timestamp citations.
 
 ---
@@ -165,7 +167,7 @@ Youtube_RAG/
 
 ### `src/retriever.py`
 - **Responsibility:** Semantic search configuration.
-- **Implementation:** Defines a `MultiQueryRetriever` (or similar configured retriever) to query the FAISS database effectively.
+- **Implementation:** Defines a `MultiQueryRetriever` to query the FAISS database effectively using an MMR (Maximal Marginal Relevance) search strategy to balance relevance and diversity.
 
 ### `src/embeddings.py` & `src/llm.py`
 - **Responsibility:** Model instantiations.
@@ -194,14 +196,24 @@ The pipeline transforms raw video into a queryable database:
 When a user asks: *"What is the main ingredient?"*
 1. **Query:** The question is passed to the backend.
 2. **Embeddings:** The question is converted into a MiniLM vector.
-3. **Similarity Search:** FAISS calculates the Cosine Similarity between the question vector and all chunk vectors, returning the top matches.
+3. **Similarity Search:** FAISS calculates the Cosine Similarity between the question vector and all chunk vectors, returning the top matches using **Maximal Marginal Relevance (MMR)** instead of a plain similarity search.
 4. **Prompt Creation:** The text from the matched chunks is injected into the LLM prompt.
 5. **LLM Inference:** Llama-3 reads the prompt (containing the transcript segments) and answers the question.
 6. **Streamed Response:** The answer streams back to the frontend immediately.
 
 ---
 
-## 10. Timestamp Citation System
+## 10. Retrieval Strategy (MMR-based Search)
+
+Unlike a standard RAG pipeline that relies solely on plain similarity search, this project utilizes **Maximal Marginal Relevance (MMR)** in the FAISS retriever. 
+
+- **The Problem with Standard Search:** In long YouTube videos, a speaker might repeat the same concept multiple times. A standard similarity search would retrieve multiple identical chunks, starving the LLM of broader context.
+- **The MMR Solution:** MMR balances **relevance** (how closely the chunk matches the query) and **diversity** (how different the chunks are from each other).
+- **Result:** It drastically reduces redundant results, improves overall context coverage, and ultimately elevates the quality and accuracy of the LLM's answers for lengthy videos.
+
+---
+
+## 11. Timestamp Citation System
 
 Without citations, a RAG system provides no proof. This project uses a highly effective timestamping system:
 - **Preservation:** `ingestion.py` pairs every sentence with its start time `[[time]] sentence`.
@@ -211,7 +223,7 @@ Without citations, a RAG system provides no proof. This project uses a highly ef
 
 ---
 
-## 11. Caching Mechanism
+## 12. Caching Mechanism
 
 Because YouTube aggressively rate-limits IPs fetching transcripts, caching is critical.
 - **Transcript Cache:** Stored in `cache/transcripts/`. Next time the same video is requested, ingestion hits the cache file, bypassing the network and saving ~1-2 seconds.
@@ -219,7 +231,7 @@ Because YouTube aggressively rate-limits IPs fetching transcripts, caching is cr
 
 ---
 
-## 12. API Documentation
+## 13. API Documentation
 
 ### `POST /load-video`
 - **Purpose:** Initializes the RAG session for a given video.
@@ -244,7 +256,7 @@ Because YouTube aggressively rate-limits IPs fetching transcripts, caching is cr
 
 ---
 
-## 13. Error Handling
+## 14. Error Handling
 
 - **Transcript Unavailable:** Caught gracefully. If a video has disabled captions or is blocked, `get_transcript` returns a structured dictionary instead of throwing a stack trace. `app.py` intercepts this and alerts the user directly in the UI.
 - **Retry Mechanism:** Exponential backoff (1s, 2s, 4s) absorbs temporary API connection drops.
@@ -253,7 +265,7 @@ Because YouTube aggressively rate-limits IPs fetching transcripts, caching is cr
 
 ---
 
-## 14. Installation Guide
+## 15. Installation Guide
 
 **1. Clone the repository:**
 ```bash
@@ -290,7 +302,7 @@ uvicorn app:app --reload --port 8000
 
 ---
 
-## 15. Environment Variables
+## 16. Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
@@ -298,7 +310,7 @@ uvicorn app:app --reload --port 8000
 
 ---
 
-## 16. How to Use
+## 17. How to Use
 
 1. Start your `uvicorn` backend server.
 2. Open any YouTube video in Google Chrome.
@@ -310,7 +322,7 @@ uvicorn app:app --reload --port 8000
 
 ---
 
-## 17. Performance Optimizations
+## 18. Performance Optimizations
 
 - **Groq LPU Processing:** Utilizing Groq instead of standard GPU providers allows token generation speeds exceeding 300+ tokens per second.
 - **FAISS vs Heavy DBs:** By using local FAISS indexes instead of heavy network databases (like Pinecone or Qdrant), we eliminate network latency during the retrieval step.
@@ -319,7 +331,7 @@ uvicorn app:app --reload --port 8000
 
 ---
 
-## 18. Future Improvements
+## 19. Future Improvements
 
 - **Hybrid Search:** Combine keyword search (BM25) with semantic vector search (FAISS) to improve accuracy on specific noun/name lookups.
 - **Whisper Integration:** If a video lacks transcripts, automatically download the audio track and transcribe it locally using OpenAI's Whisper model.
@@ -328,19 +340,20 @@ uvicorn app:app --reload --port 8000
 
 ---
 
-## 19. Resume Highlights
+## 20. Resume Highlights
 
 - **Designed and developed a Retrieval-Augmented Generation (RAG) system** capable of parsing, indexing, and semantically querying YouTube videos using LangChain and FastAPI.
 - **Engineered a scalable ingestion pipeline** that extracts auto-generated captions, applies exponential backoff retries, and translates multiple languages to English using the YouTube Transcript API.
 - **Implemented a highly optimized chunking and vector storage strategy** using FAISS and HuggingFace MiniLM, persisting indexes locally to achieve sub-second retrieval latency.
 - **Integrated Server-Sent Events (SSE)** in FastAPI to stream LLM outputs directly to a custom Chrome Extension, ensuring real-time conversational UX.
+- **Implemented Maximal Marginal Relevance (MMR)-based retrieval in FAISS to improve diversity and reduce redundancy in RAG-based YouTube question answering.**
 - **Developed a proprietary timestamp citation system**, extracting timestamp metadata during document splitting to provide users with direct, clickable deep-links to specific moments in the video.
 - **Reduced API dependency and improved stability** by creating a two-tier local caching mechanism for raw transcripts and serialized vector databases.
 - **Leveraged Groq’s LPU infrastructure** with Llama-3.3-70B to achieve lightning-fast inference and context synthesis.
 
 ---
 
-## 20. Key Learnings
+## 21. Key Learnings
 
 - **RAG Architecture:** Mastered the complex interaction between retrievers, prompts, and Large Language Models to solve hallucinations.
 - **LangChain (LCEL):** Deepened understanding of LangChain Expression Language for building robust, parallelized processing chains.
